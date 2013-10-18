@@ -310,7 +310,7 @@ ${name}""", **kwargs)
             left=left
         )
 
-@view_config(route_name='employee_form_create_absence', permission='admin')
+@view_config(route_name='employee_form_create_absence', permission='hr')
 class CreateAbsence(BaseView):
     def dispatch(self):
         form = AbsenceCreateForm(self.request.POST, request=self.request)

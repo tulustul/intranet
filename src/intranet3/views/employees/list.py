@@ -45,7 +45,7 @@ class ApplyArgsMixin(object):
 
         return query
 
-@view_config(route_name='employee_list_late')
+@view_config(route_name='employee_list_late', permission='hr')
 class Late(ApplyArgsMixin, BaseView):
     def get(self):
         query = m.Late.query.filter(m.Late.deleted==False).order_by(desc(m.Late.added_ts))
@@ -54,7 +54,7 @@ class Late(ApplyArgsMixin, BaseView):
         form = FilterForm(formdata=self.request.GET)
         return dict(lates=lates, form=form)
 
-@view_config(route_name='employee_list_wrong_time')
+@view_config(route_name='employee_list_wrong_time', permission='hr')
 class WrongTime(ApplyArgsMixin, BaseView):
     def get(self):
         query = m.WrongTime.query.filter(m.WrongTime.deleted==False).order_by(desc(m.WrongTime.added_ts))
@@ -63,7 +63,7 @@ class WrongTime(ApplyArgsMixin, BaseView):
         form = FilterForm(formdata=self.request.GET)
         return dict(wrongtimes=wrongtimes, form=form)
 
-@view_config(route_name='employee_list_absence')
+@view_config(route_name='employee_list_absence', permission='hr')
 class Absence(ApplyArgsMixin, BaseView):
     def get(self):
         query = m.Absence.query.filter(m.Absence.deleted==False).order_by(desc(m.Absence.added_ts))
@@ -72,7 +72,7 @@ class Absence(ApplyArgsMixin, BaseView):
         form = FilterForm(formdata=self.request.GET)
         return dict(absences=absences, form=form)
 
-@view_config(route_name='employee_list_absence_pivot')
+@view_config(route_name='employee_list_absence_pivot', permission='hr')
 class AbsencePivot(BaseView):
     def get(self):
         year = self.request.GET.get('year', datetime.date.today().year)
