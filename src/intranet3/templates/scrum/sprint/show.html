@@ -28,11 +28,14 @@
                 <td>{{ bug.desc }}</td>
                 <td>{{ bug.owner.name }}</td>
                 <td>{{ bug.whiteboard['p'] }}</td>
-                <td>{{ '%.2f' % bug.sprint_time }} ({{ '%.2f' % bug.time }})</td>
                 <td>
-                    {{ (bug.velocity | round(2)) if bug.velocity else '-' }}
+                    <a href="{{ request.url_for('/times/tickets/report', users=bug.owner.id, projects=bug.project_id, date_range=str_date, group_by_client='y', group_by_project='y', group_by_bugs='y',group_by_user='y', ticket_choice='all' ,bigger_than=0)}}">
+                    {{ '%.2f' % bug.sprint_time }} ({{ '%.2f' % bug.time }})</td>
+                    </a>
+                <td>
+                    <span class="{{ 'velocity-opened' if not bug.is_closed() else '' }}">{{ (bug.velocity | round(2)) }}</span>
                     {% if bug.danger %}
-                        <div class="ui-icon ui-icon-alert task-danger" title="Low velocity"> </div>
+                        <div class="ui-icon ui-icon-alert task-danger" title="High mean devation"> </div>
                     {% endif %}
                 </td>
                 <td>{{ bug.status }}</td>

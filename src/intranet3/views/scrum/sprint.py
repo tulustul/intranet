@@ -68,6 +68,20 @@ class List(BaseView):
             )
         else:
             stats = None
+
+
+        all_sprints_for_velocity = self.session.query(
+            Sprint.project_id,
+            Sprint.worked_hours,
+            Sprint.bugs_worked_hours,
+            Sprint.achieved_points
+        ).all()
+
+        for sprint in sprints:
+            associated_sprints = [s for s in all_sprints_for_velocity
+                                 if s[0]==sprint.project_id]
+            sprint.calculate_velocities(associated_sprints)
+
         return dict(
             sprints=sprints,
             form=form,
@@ -124,17 +138,14 @@ class BaseSprintView(BaseView):
         project = Project.query.get(sprint.project_id)
 
 
-        sprints = [s for s in session.query(Sprint)
-                            .filter(Sprint.start<=datetime.date.today())
-                            .filter(Sprint.end>=datetime.date.today())
-        ]
-        total_worked_hours = sum([s.worked_hours for s in sprints])
-        total_anchieved_points = sum([s.achieved_points for s in sprints])
+        sprints = self.session.query(
+            Sprint.project_id,
+            Sprint.worked_hours,
+            Sprint.bugs_worked_hours,
+            Sprint.achieved_points
+        ).filter(Sprint.project_id==sprint.project_id).all()
 
-        sprint.mean_velocity = sum([s.velocity for s in sprints])\
-                                 / len(sprints) if len(sprints) else 0.0
-        sprint.total_velocity = total_anchieved_points / total_worked_hours\
-                                 * 8.0 if total_worked_hours else 0.0
+        sprint.calculate_velocities(sprints)
 
         self.v['project'] = project
         self.v['sprint'] = sprint
@@ -169,7 +180,9 @@ class Show(ClientProtectionMixin, FetchBugsMixin, BaseSprintView):
         for bug in bugs:
             bugAdapter = BugUglyAdapter(bug)
             bug.danger = bugAdapter.is_closed() \
-                        and bugAdapter.velocity <= (0.7 * mean_velocity)
+                        and (bugAdapter.velocity <= (0.7 * mean_velocity) \
+                        or bugAdapter.velocity >= (1.3 * mean_velocity))
+
 
         sw = SprintWrapper(sprint, bugs, self.request)
 
@@ -177,6 +190,7 @@ class Show(ClientProtectionMixin, FetchBugsMixin, BaseSprintView):
             tracker=tracker,
             bugs=sw.bugs,
             info=sw.get_info(),
+            str_date=self._sprint_daterange(sprint.start, sprint.end),
         )
 
     def get_mean_task_velocity(self):
@@ -189,6 +203,9 @@ class Show(ClientProtectionMixin, FetchBugsMixin, BaseSprintView):
             return sum([b.velocity for b in bugs if b.is_closed()]) / len(bugs)
         else:
             return 0.0
+
+    def _sprint_daterange(self, st, end):
+        return '%s - %s' % (st.strftime('%d-%m-%Y'), end.strftime('%d-%m-%Y'))
 
 
 @view_config(route_name='scrum_sprint_board', permission='client')
@@ -274,7 +291,7 @@ class Charts(ClientProtectionMixin, FetchBugsMixin, BaseSprintView):
         burndown = sw.get_burndown_data()
         tracker = Tracker.query.get(sprint.project.tracker_id)
 
-        entries, sum_ = sw.get_worked_hours()
+        entries, sum_, bugs_sum = sw.get_worked_hours()
         entries.insert(0, ('Employee', 'Time'))
         piechart_data = json.dumps(entries)
 
