@@ -37,11 +37,53 @@ class TrackerForm(wtf.Form):
         _(u'Tracker type'),
         choices=TRACKER_TYPES.items(),
         validators=[validators.Required()])
-    name = wtf.TextField(_(u'Tracker friendly name'), validators=[validators.Required()])
-    url = wtf.TextField(_(u'Tracker URL'), validators=[validators.Required(), validators.URL()])
-    mailer = wtf.TextField(_(u'Mailer email'), validators=[validators.Optional(), validators.Email()])
+
+    name = wtf.TextField(
+        _(u'Tracker friendly name'),
+        validators=[validators.Required()]
+    )
+    url = wtf.TextField(
+        _(u'Tracker URL'),
+        validators=[validators.Required(), validators.URL()]
+    )
+    mailer = wtf.TextField(
+        _(u'Mailer email'),
+        validators=[validators.Optional(), validators.Email()]
+    )
+
 
 class TrackerLoginForm(wtf.Form):
     """ Tracker login form """
-    login = wtf.TextField(_(u'Login'), validators=[validators.Required()])
-    password = StarredPasswordField(_(u'Password'), validators=[validators.Required()])
+    login = wtf.TextField(
+        label=_(u'Login'),
+        description='Login for given tracker',
+        validators=[validators.Required()]
+    )
+    password = StarredPasswordField(
+        label=_(u'Password'),
+        description='Password for given tracker',
+        validators=[validators.Required()]
+    )
+
+
+class STXNEXTTrackerLoginForm(TrackerLoginForm):
+    """ Rockzilla tracker login form """
+    login = wtf.TextField(
+        label=_(u'Login'),
+        description='Your STX NEXT email',
+        validators=[validators.Required()]
+    )
+    password = StarredPasswordField(
+        label=_(u'Password'),
+        description=_(u'your STX NEXT LDAP password'),
+        validators=[validators.Required()]
+    )
+
+
+class PivotalTrackerLoginForm(TrackerLoginForm):
+    """ Pivotal tracker login form """
+    email = wtf.TextField(
+        label=_(u'Email'),
+        description=_(u'Your Pivotal account email'),
+        validators=[validators.Required(), validators.Email()]
+    )

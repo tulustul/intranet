@@ -74,7 +74,10 @@ class FetcherMeta(type):
             )
             # clear fetcher
             self._parsed_data = []
-            cached = memcache.get(self._memcached_key)
+            if self.use_cache:
+                cached = memcache.get(self._memcached_key)
+            else:
+                cached = None
 
             if cached is not None:
                 DEBUG(u"Bugs found in cache for key %s" % self._memcached_key)
@@ -106,14 +109,16 @@ class BaseFetcher(object):
                  timeout=MAX_TIMEOUT):
         self._greenlet = None
         self.tracker = tracker
-        self.login = credentials.login
-        self.password = credentials.password
+        self.login = credentials['login']
+        self.password = credentials['password']
+        self.credentials = credentials
         self.user = user
         self.login_mapping = login_mapping
         self.error = None
         self.cache_key = None
         self.dependson_and_blocked_status = {}
         self.timeout = timeout
+        self.use_cache = True
 
         # _parsed_data is set by metaclass if it is present in memached
         self._parsed_data = []

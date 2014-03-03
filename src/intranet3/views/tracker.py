@@ -7,11 +7,23 @@ from sqlalchemy.orm.query import aliased
 from intranet3.forms.common import DeleteForm
 from intranet3.utils.views import BaseView
 from intranet3.models import Tracker, TrackerCredentials, Project
-from intranet3.forms.tracker import (TrackerForm, TRACKER_TYPES, TrackerLoginForm,
-                                     trackers_login_validators)
+from intranet3.forms.tracker import (
+    TrackerForm,
+    TRACKER_TYPES,
+    TrackerLoginForm,
+    STXNEXTTrackerLoginForm,
+    trackers_login_validators,
+)
 from intranet3.log import INFO_LOG
+from intranet3.asyncfetchers import (
+    get_fetcher,
+    FetcherBaseException,
+    FetcherTimeout,
+    FetcherBadDataError,
+)
 
 LOG = INFO_LOG(__name__)
+
 
 class UserCredentialsMixin(object):
     def _get_current_users_credentials(self):
@@ -44,6 +56,9 @@ class UserCredentialsMixin(object):
 
         return TrackerCredentials.query.filter(TrackerCredentials.user==self.request.user)\
                                        .filter(TrackerCredentials.tracker_id==tracker.id).first()
+
+    def _build_credentials(self, form):
+        return {field.name: field.data for field in form}
 
 
 @view_config(route_name='tracker_list', permission='can_see_own_bugs')
@@ -85,64 +100,130 @@ class Add(BaseView):
 
 
 def _add_tracker_login_validator(tracker_name, form):
-    validators = {}
+    tracker_validators = {}
     for tracker_name in (tracker_name, 'all'):
         if tracker_name in trackers_login_validators:
-            for validator_name, validator in trackers_login_validators[tracker_name].items():
-                if validator_name not in validators:
-                    validators[validator_name] = []
+            validators = trackers_login_validators[tracker_name].items()
+            for validator_name, validator in validators:
+                if validator_name not in tracker_validators:
+                    tracker_validators[validator_name] = []
 
-                validators[validator_name].append(validator)
+                tracker_validators[validator_name].append(validator)
 
-    for validator_name, validator in validators.items():
-        getattr(form, validator_name).validators = validators[validator_name]
+    for validator_name, validator in tracker_validators.items():
+        getattr(form, validator_name).validators = \
+            tracker_validators[validator_name]
+
 
 @view_config(route_name='tracker_login', permission='can_see_own_bugs')
 class Login(UserCredentialsMixin, BaseView):
     def get(self):
-        tracker_id = self.request.GET.get('tracker_id')
-        tracker =  Tracker.query.get(tracker_id)
-        credentials = self._get_current_users_credentials_for_tracker(tracker)
-        form = TrackerLoginForm(obj=credentials)
+        tracker, tracker_credentials, current_credentials, form_class = \
+            self._get_form_data()
+
+        form = form_class(**current_credentials)
+
         return dict(form=form, tracker=tracker)
 
     def post(self):
-        tracker_id = self.request.GET.get('tracker_id')
-        tracker =  Tracker.query.get(tracker_id)
-        credentials = self._get_current_users_credentials_for_tracker(tracker)
-        form = TrackerLoginForm(self.request.POST, obj=credentials)
+        tracker, tracker_credentials, current_credentials, form_class = \
+            self._get_form_data()
+
+        form = form_class(self.request.POST, **current_credentials)
 
         _add_tracker_login_validator(tracker.name, form)
 
+        credentials_data = self._build_credentials(form)
+
         if form.validate():
-            if credentials is None:
-                credentials = TrackerCredentials(
+            if tracker_credentials is None:
+                tracker_credentials = TrackerCredentials(
                     user_id=self.request.user.id,
                     tracker_id=tracker.id,
-                    login=form.login.data,
-                    password=form.password.data,
+                    credentials=credentials_data,
                 )
-                self.session.add(credentials)
+                self.session.add(tracker_credentials)
             else:
-                credentials.login=form.login.data
-                credentials.password=form.password.data
+                tracker_credentials.credentials = credentials_data
+
+            mapping = {
+                credentials_data.get('login', '').lower(): self.request.user
+            }
+
             self.flash(self._(u"Credentials saved"))
             LOG(u"Credentials saved")
-            url = self.request.url_for('/tracker/list')
-            return HTTPFound(location=url)
+
+            fetcher = get_fetcher(
+                tracker, credentials_data, self.request.user, mapping
+            )
+
+            if self._check_tracker_connection(fetcher):
+                url = self.request.url_for('/tracker/list')
+                return HTTPFound(location=url)
+
         return dict(form=form, tracker=tracker)
+
+    def _get_form_data(self):
+        tracker_id = self.request.GET.get('tracker_id')
+        tracker = Tracker.query.get(tracker_id)
+        tracker_credentials = \
+            self._get_current_users_credentials_for_tracker(tracker)
+
+        form_class = Tracker.LOGIN_FORM.get(tracker.type, TrackerLoginForm)
+
+        if tracker_credentials is None:
+            current_credentials = {}
+        else:
+            current_credentials = tracker_credentials.credentials
+
+        if tracker.name == 'STX Next':
+            form_class = STXNEXTTrackerLoginForm
+            if tracker_credentials is None:
+                current_credentials['login'] = self.request.user.email
+
+        return tracker, tracker_credentials, current_credentials, form_class
+
+    def _check_tracker_connection(self, fetcher):
+        try:
+            fetcher.use_cache = False
+            fetcher.fetch_user_tickets()
+            fetcher.get_result()
+
+        except FetcherTimeout as e:
+            self.flash(
+                'Fetchers for trackers %s timed-out' %
+                fetcher.tracker.name,
+                klass='error',
+            )
+            return False
+
+        except FetcherBadDataError as e:
+            self.flash(e, klass='error')
+            return False
+
+        except FetcherBaseException as e:
+            self.flash(
+                'Could not fetch bugs from tracker %s' %
+                fetcher.tracker.name,
+                klass='error',
+            )
+            return False
+
+        else:
+            return True
+
 
 @view_config(route_name='tracker_edit', permission='can_edit_trackers')
 class Edit(BaseView):
     def get(self):
         tracker_id = self.request.GET.get('tracker_id')
-        tracker =  Tracker.query.get(tracker_id)
+        tracker = Tracker.query.get(tracker_id)
         form = TrackerForm(obj=tracker)
         return dict(tracker_id=tracker.id, form=form)
 
     def post(self):
         tracker_id = self.request.GET.get('tracker_id')
-        tracker =  Tracker.query.get(tracker_id)
+        tracker = Tracker.query.get(tracker_id)
         form = TrackerForm(self.request.POST, obj=tracker)
         if form.validate():
             tracker.type = form.type.data

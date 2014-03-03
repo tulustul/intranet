@@ -38,8 +38,12 @@ class Bugs(object):
             if full_mapping:
                 mapping = TrackerCredentials.get_logins_mapping(tracker)
             else:
-                mapping = {credentials.login.lower(): self.user}
-            fetcher = get_fetcher(tracker, credentials, user, mapping)
+                mapping = {
+                    credentials.credentials.get('login', '').lower(): self.user
+                }
+            fetcher = get_fetcher(
+                tracker, credentials.credentials, user, mapping
+            )
             fetchers.append(fetcher)
             fetcher_callback(fetcher) # initialize query
         bugs = []
