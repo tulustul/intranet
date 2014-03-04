@@ -74,10 +74,7 @@ class FetcherMeta(type):
             )
             # clear fetcher
             self._parsed_data = []
-            if self.use_cache:
-                cached = memcache.get(self._memcached_key)
-            else:
-                cached = None
+            cached = memcache.get(self._memcached_key)
 
             if cached is not None:
                 DEBUG(u"Bugs found in cache for key %s" % self._memcached_key)
@@ -118,7 +115,6 @@ class BaseFetcher(object):
         self.cache_key = None
         self.dependson_and_blocked_status = {}
         self.timeout = timeout
-        self.use_cache = True
 
         # _parsed_data is set by metaclass if it is present in memached
         self._parsed_data = []
@@ -158,6 +154,10 @@ class BaseFetcher(object):
         if not self._auth_data:
             self._auth_data = self.get_auth()
         self.set_auth(session, self._auth_data)
+
+    def clear_user_cache(self):
+        if self._memcached_key:
+            memcache.delete(self._memcached_key)
 
     def get_rpc(self):
         rpc = RPC()

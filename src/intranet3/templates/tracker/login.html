@@ -18,5 +18,12 @@
                 </div>
             </form>
         </div>
+
+        <div class="span8">
+            {% if tracker.description  %}
+                <pre>{{ tracker.description }}</pre>
+            {% endif %}
+         </div>
+
     </div>
 {% endblock %}

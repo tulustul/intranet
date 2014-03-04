@@ -5,9 +5,16 @@ from sqlalchemy.types import Enum, String, Integer
 from pyramid.decorator import reify
 
 from intranet3.utils.encryption import encrypt, decrypt
-from intranet3.models import Base, User, DBSession
+from intranet3.models import (
+    Base,
+    User,
+    Project,
+    DBSession,
+)
+
 from intranet3.helpers import serialize_url
 from intranet3.forms import tracker as tracker_forms
+from intranet3.asyncfetchers import FETCHERS
 
 bugzilla_ticket_url = lambda tracker_url, ticket_id: \
     '%s/show_bug.cgi?id=%s' % (tracker_url, ticket_id)
@@ -88,6 +95,10 @@ def jira_new_ticket_url(tracker_url, project_selector, component_selector):
 
 class Tracker(Base):
     """ Tracker model """
+
+    class TrackerPermissionError(Exception):
+        pass
+
     __tablename__ = 'tracker'
 
     URL_CONSTRUCTORS = {
@@ -128,6 +139,7 @@ class Tracker(Base):
     name = Column(String, nullable=False, unique=True)
     url = Column(String, nullable=False, unique=True)
     mailer = Column(String, nullable=True, unique=True)
+    description = Column(String, nullable=True)
 
     credentials = orm.relationship('TrackerCredentials', backref='tracker',
                                    lazy='dynamic')
@@ -152,6 +164,51 @@ class Tracker(Base):
     def logins_mapping(self):
         return TrackerCredentials.get_logins_mapping(self)
 
+    def get_fetcher(self, tracker_credentials, user, full_mapping=False):
+        fetcher_class = FETCHERS.get(self.type)
+
+        if full_mapping:
+            mapping = self.logins_mapping
+        else:
+            mapping = tracker_credentials.get_login_mapping(user)
+
+        return fetcher_class(
+            self,
+            tracker_credentials.credentials,
+            user,
+            mapping,
+        )
+
+    def get_form(self):
+        return Tracker.LOGIN_FORM.get(
+            self.type,
+            tracker_forms.TrackerLoginForm
+        )
+
+    def get_credentials(self, user):
+        if user.client:
+            query = Tracker.query \
+                .filter(Project.tracker_id == self.id) \
+                .filter(Project.client_id == user.client.id) \
+                .filter(Tracker.id == Project.tracker_id)
+            result = query.first()
+            if not result:
+                raise Tracker.TrackerPermissionError(
+                    'Client has no permissions to this tracker'
+                )
+
+        else:
+            return TrackerCredentials.query \
+                .filter(TrackerCredentials.user == user) \
+                .filter(TrackerCredentials.tracker_id == self.id) \
+                .first()
+
+    def create_credentials(self, user):
+        return TrackerCredentials(
+            tracker_id=self.id,
+            user_id=user.id
+        )
+
 
 class TrackerCredentials(Base):
     """ Credentials for given tracker for given user """
@@ -161,21 +218,24 @@ class TrackerCredentials(Base):
                         primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey(User.id), nullable=False,
                      primary_key=True, index=True)
-    credentials = Column(String, nullable=False)
+    credentials_json = Column(String, nullable=False)
 
-    def __getattribute__(self, name):
-        value = super(TrackerCredentials, self).__getattribute__(name)
-        if name == 'credentials' and value:
-            value = json.loads(value)
-            value['password'] = decrypt(value.get('password', ''))
-        return value
+    @property
+    def credentials(self):
+        credentials = json.loads(self.credentials_json)
+        credentials['password'] = decrypt(credentials.get('password', ''))
+        return credentials
 
-    def __setattr__(self, name, value):
-        if name == 'credentials' and value:
-            value = value.copy()
-            value['password'] = encrypt(value.get('password', ''))
-            value = json.dumps(value)
-        super(TrackerCredentials, self).__setattr__(name, value)
+    @credentials.setter
+    def credentials(self, value):
+        value = value.copy()
+        value['password'] = encrypt(value.get('password', ''))
+        self.credentials_json = json.dumps(value)
+
+    def get_login_mapping(self, user):
+        return {
+            self.credentials.get('login', '').lower(): user
+        }
 
     @classmethod
     def get_logins_mapping(cls, tracker):
@@ -186,7 +246,7 @@ class TrackerCredentials(Base):
             .filter(cls.tracker_id == tracker.id)\
             .filter(cls.user_id == User.id)
 
-        return dict(
-            (credentials.credentials['login'].lower(), user)
+        return {
+            credentials.credentials['login'].lower(): user
             for credentials, user in creds_query
-        )
+        }
